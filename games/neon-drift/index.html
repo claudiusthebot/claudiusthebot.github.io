@@ -1,0 +1,606 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>Neon Drift</title>
+  <style>
+    :root {
+      --bg: #090b10;
+      --ink: #f4f7fb;
+      --muted: #9ba9b8;
+      --cyan: #47e6ff;
+      --lime: #b8ff5b;
+      --pink: #ff4fa3;
+      --amber: #ffd166;
+      --panel: rgba(10, 14, 22, 0.78);
+      --line: rgba(255, 255, 255, 0.16);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    body {
+      position: fixed;
+      inset: 0;
+    }
+
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      background: radial-gradient(circle at 50% 20%, #16202f 0, #0b0e15 52%, #050609 100%);
+    }
+
+    .hud {
+      position: fixed;
+      top: max(12px, env(safe-area-inset-top));
+      left: max(12px, env(safe-area-inset-left));
+      right: max(12px, env(safe-area-inset-right));
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      pointer-events: none;
+      z-index: 3;
+    }
+
+    .metric {
+      min-width: 84px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      backdrop-filter: blur(14px);
+    }
+
+    .metric span {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1;
+      text-transform: uppercase;
+    }
+
+    .metric strong {
+      display: block;
+      margin-top: 5px;
+      font-size: 24px;
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .right {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+    }
+
+    button {
+      min-width: 42px;
+      height: 42px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--ink);
+      font: inherit;
+      font-weight: 800;
+      cursor: pointer;
+      pointer-events: auto;
+      backdrop-filter: blur(14px);
+    }
+
+    .overlay {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 22px;
+      z-index: 4;
+      background: linear-gradient(180deg, rgba(4, 7, 12, 0.24), rgba(4, 7, 12, 0.68));
+    }
+
+    .panel {
+      width: min(420px, 100%);
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(7, 10, 17, 0.88);
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55);
+      backdrop-filter: blur(18px);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(42px, 13vw, 68px);
+      line-height: 0.92;
+      letter-spacing: 0;
+    }
+
+    .tagline {
+      margin: 14px 0 18px;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.45;
+    }
+
+    .start {
+      width: 100%;
+      height: 52px;
+      border-color: rgba(71, 230, 255, 0.72);
+      background: linear-gradient(90deg, rgba(71, 230, 255, 0.24), rgba(184, 255, 91, 0.2));
+      color: var(--ink);
+    }
+
+    .keys {
+      display: flex;
+      gap: 8px;
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .chip {
+      flex: 1;
+      padding: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.11);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .hidden { display: none; }
+
+    @media (max-width: 420px) {
+      .metric {
+        min-width: 74px;
+        padding: 7px 8px;
+      }
+
+      .metric strong { font-size: 21px; }
+      .right { gap: 6px; }
+      button { width: 40px; height: 40px; }
+      .panel { padding: 18px; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game" aria-label="Neon Drift game"></canvas>
+
+  <div class="hud">
+    <div class="metric"><span>Score</span><strong id="score">0</strong></div>
+    <div class="right">
+      <div class="metric"><span>Best</span><strong id="best">0</strong></div>
+      <button id="pause" type="button" aria-label="Pause">Ⅱ</button>
+    </div>
+  </div>
+
+  <div class="overlay" id="overlay">
+    <div class="panel">
+      <h1>Neon Drift</h1>
+      <p class="tagline">Thread the light-bike through traffic, grab charge cells, and keep the combo alive.</p>
+      <button class="start" id="start" type="button">Start Run</button>
+      <div class="keys">
+        <div class="chip">Drag anywhere to steer.</div>
+        <div class="chip">Keyboard: arrows or A/D.</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (() => {
+      const canvas = document.getElementById('game');
+      const ctx = canvas.getContext('2d');
+      const scoreEl = document.getElementById('score');
+      const bestEl = document.getElementById('best');
+      const overlay = document.getElementById('overlay');
+      const startBtn = document.getElementById('start');
+      const pauseBtn = document.getElementById('pause');
+
+      const state = {
+        w: 0,
+        h: 0,
+        dpr: 1,
+        t: 0,
+        last: 0,
+        running: false,
+        paused: false,
+        gameOver: false,
+        score: 0,
+        best: Number(localStorage.getItem('neon-drift-best') || 0),
+        speed: 270,
+        road: { left: 0, right: 0, top: 0, bottom: 0 },
+        player: { x: 0, y: 0, vx: 0, r: 16, targetX: 0 },
+        obstacles: [],
+        pickups: [],
+        sparks: [],
+        lanes: 5,
+        spawnTimer: 0,
+        pickupTimer: 0,
+        combo: 1,
+        comboTimer: 0,
+        steer: 0,
+        pointer: null,
+      };
+
+      bestEl.textContent = state.best;
+
+      function resize() {
+        state.dpr = Math.min(window.devicePixelRatio || 1, 2);
+        state.w = window.innerWidth;
+        state.h = window.innerHeight;
+        canvas.width = Math.floor(state.w * state.dpr);
+        canvas.height = Math.floor(state.h * state.dpr);
+        canvas.style.width = `${state.w}px`;
+        canvas.style.height = `${state.h}px`;
+        ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+
+        const roadWidth = Math.min(state.w * 0.84, 430);
+        state.road.left = (state.w - roadWidth) / 2;
+        state.road.right = state.road.left + roadWidth;
+        state.road.top = -40;
+        state.road.bottom = state.h + 40;
+        state.player.y = state.h * 0.78;
+        state.player.r = Math.max(12, Math.min(18, state.w * 0.04));
+        if (!state.running) {
+          state.player.x = state.w / 2;
+          state.player.targetX = state.player.x;
+        }
+      }
+
+      function reset() {
+        state.t = 0;
+        state.last = performance.now();
+        state.running = true;
+        state.paused = false;
+        state.gameOver = false;
+        state.score = 0;
+        state.speed = 270;
+        state.obstacles.length = 0;
+        state.pickups.length = 0;
+        state.sparks.length = 0;
+        state.spawnTimer = 0.3;
+        state.pickupTimer = 1.1;
+        state.combo = 1;
+        state.comboTimer = 0;
+        state.player.x = state.w / 2;
+        state.player.targetX = state.player.x;
+        scoreEl.textContent = '0';
+        pauseBtn.textContent = 'Ⅱ';
+        overlay.classList.add('hidden');
+      }
+
+      function laneX(i) {
+        const width = state.road.right - state.road.left;
+        return state.road.left + width * ((i + 0.5) / state.lanes);
+      }
+
+      function spawnObstacle() {
+        const lane = Math.floor(Math.random() * state.lanes);
+        const width = (state.road.right - state.road.left) / state.lanes;
+        state.obstacles.push({
+          x: laneX(lane),
+          y: -60,
+          w: width * (0.46 + Math.random() * 0.18),
+          h: 34 + Math.random() * 44,
+          hue: Math.random() > 0.45 ? '#ff4fa3' : '#ffd166',
+          passed: false,
+        });
+      }
+
+      function spawnPickup() {
+        const lane = Math.floor(Math.random() * state.lanes);
+        state.pickups.push({
+          x: laneX(lane),
+          y: -50,
+          r: 9,
+          phase: Math.random() * Math.PI * 2,
+        });
+      }
+
+      function addSparks(x, y, color, count) {
+        for (let i = 0; i < count; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const s = 50 + Math.random() * 190;
+          state.sparks.push({
+            x,
+            y,
+            vx: Math.cos(a) * s,
+            vy: Math.sin(a) * s,
+            life: 0.35 + Math.random() * 0.3,
+            max: 0.65,
+            color,
+          });
+        }
+      }
+
+      function endRun() {
+        state.running = false;
+        state.gameOver = true;
+        state.best = Math.max(state.best, Math.floor(state.score));
+        localStorage.setItem('neon-drift-best', String(state.best));
+        bestEl.textContent = state.best;
+        startBtn.textContent = 'Run Again';
+        overlay.querySelector('.tagline').textContent = `Score ${Math.floor(state.score)}. Best ${state.best}.`;
+        overlay.classList.remove('hidden');
+        addSparks(state.player.x, state.player.y, '#ff4fa3', 38);
+      }
+
+      function collideCircleRect(c, r) {
+        const dx = Math.abs(c.x - r.x);
+        const dy = Math.abs(c.y - r.y);
+        if (dx > r.w / 2 + c.r || dy > r.h / 2 + c.r) return false;
+        if (dx <= r.w / 2 || dy <= r.h / 2) return true;
+        const cx = dx - r.w / 2;
+        const cy = dy - r.h / 2;
+        return cx * cx + cy * cy <= c.r * c.r;
+      }
+
+      function update(dt) {
+        if (!state.running || state.paused) return;
+        state.t += dt;
+        state.speed = Math.min(560, state.speed + dt * 7.5);
+        state.score += dt * (state.speed / 26) * state.combo;
+        state.comboTimer = Math.max(0, state.comboTimer - dt);
+        if (state.comboTimer <= 0) state.combo = 1;
+        scoreEl.textContent = String(Math.floor(state.score));
+
+        if (state.pointer !== null) {
+          state.player.targetX = state.pointer;
+        } else if (state.steer !== 0) {
+          state.player.targetX += state.steer * dt * 360;
+        }
+
+        state.player.targetX = Math.max(state.road.left + state.player.r, Math.min(state.road.right - state.player.r, state.player.targetX));
+        state.player.x += (state.player.targetX - state.player.x) * Math.min(1, dt * 12);
+
+        state.spawnTimer -= dt;
+        state.pickupTimer -= dt;
+        if (state.spawnTimer <= 0) {
+          spawnObstacle();
+          state.spawnTimer = Math.max(0.32, 0.82 - state.t * 0.012) + Math.random() * 0.28;
+        }
+        if (state.pickupTimer <= 0) {
+          spawnPickup();
+          state.pickupTimer = 1.25 + Math.random() * 1.2;
+        }
+
+        const dy = state.speed * dt;
+        state.obstacles.forEach((o) => {
+          o.y += dy;
+          if (!o.passed && o.y > state.player.y) {
+            o.passed = true;
+            state.score += 4 * state.combo;
+          }
+        });
+        state.pickups.forEach((p) => { p.y += dy * 0.94; });
+        state.sparks.forEach((s) => {
+          s.x += s.vx * dt;
+          s.y += s.vy * dt;
+          s.vy += 220 * dt;
+          s.life -= dt;
+        });
+
+        const playerCircle = { x: state.player.x, y: state.player.y, r: state.player.r * 0.86 };
+        for (const o of state.obstacles) {
+          if (collideCircleRect(playerCircle, o)) {
+            endRun();
+            return;
+          }
+        }
+
+        for (let i = state.pickups.length - 1; i >= 0; i--) {
+          const p = state.pickups[i];
+          const dx = p.x - state.player.x;
+          const dy2 = p.y - state.player.y;
+          if (Math.hypot(dx, dy2) < state.player.r + p.r + 4) {
+            state.pickups.splice(i, 1);
+            state.combo = Math.min(8, state.combo + 1);
+            state.comboTimer = 3.4;
+            state.score += 35 * state.combo;
+            addSparks(p.x, p.y, '#b8ff5b', 14);
+          }
+        }
+
+        state.obstacles = state.obstacles.filter((o) => o.y < state.h + 90);
+        state.pickups = state.pickups.filter((p) => p.y < state.h + 60);
+        state.sparks = state.sparks.filter((s) => s.life > 0);
+      }
+
+      function drawRoad() {
+        const { left, right } = state.road;
+        const grd = ctx.createLinearGradient(left, 0, right, 0);
+        grd.addColorStop(0, 'rgba(71, 230, 255, 0.05)');
+        grd.addColorStop(0.5, 'rgba(255, 255, 255, 0.025)');
+        grd.addColorStop(1, 'rgba(255, 79, 163, 0.05)');
+        ctx.fillStyle = grd;
+        ctx.fillRect(left, 0, right - left, state.h);
+
+        const offset = (state.t * state.speed * 0.75) % 72;
+        ctx.lineWidth = 2;
+        for (let i = 1; i < state.lanes; i++) {
+          const x = state.road.left + (state.road.right - state.road.left) * (i / state.lanes);
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.11)';
+          ctx.beginPath();
+          for (let y = -72 + offset; y < state.h + 72; y += 72) {
+            ctx.moveTo(x, y);
+            ctx.lineTo(x, y + 34);
+          }
+          ctx.stroke();
+        }
+
+        ctx.strokeStyle = 'rgba(71, 230, 255, 0.62)';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(left, 0);
+        ctx.lineTo(left, state.h);
+        ctx.moveTo(right, 0);
+        ctx.lineTo(right, state.h);
+        ctx.stroke();
+      }
+
+      function roundRect(x, y, w, h, r) {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.arcTo(x + w, y, x + w, y + h, r);
+        ctx.arcTo(x + w, y + h, x, y + h, r);
+        ctx.arcTo(x, y + h, x, y, r);
+        ctx.arcTo(x, y, x + w, y, r);
+        ctx.closePath();
+      }
+
+      function drawPlayer() {
+        const p = state.player;
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.shadowColor = '#47e6ff';
+        ctx.shadowBlur = 24;
+        ctx.fillStyle = '#47e6ff';
+        ctx.beginPath();
+        ctx.moveTo(0, -p.r * 1.45);
+        ctx.lineTo(p.r * 0.9, p.r * 1.1);
+        ctx.lineTo(0, p.r * 0.68);
+        ctx.lineTo(-p.r * 0.9, p.r * 1.1);
+        ctx.closePath();
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = '#f4f7fb';
+        ctx.beginPath();
+        ctx.arc(0, -p.r * 0.12, p.r * 0.28, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        ctx.strokeStyle = 'rgba(71, 230, 255, 0.3)';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y + p.r * 1.1);
+        ctx.lineTo(p.x, state.h + 20);
+        ctx.stroke();
+      }
+
+      function draw() {
+        ctx.clearRect(0, 0, state.w, state.h);
+        drawRoad();
+
+        state.pickups.forEach((p) => {
+          const pulse = Math.sin(state.t * 6 + p.phase) * 2;
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.shadowColor = '#b8ff5b';
+          ctx.shadowBlur = 18;
+          ctx.fillStyle = '#b8ff5b';
+          ctx.beginPath();
+          ctx.arc(0, 0, p.r + pulse, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#0b0e15';
+          ctx.beginPath();
+          ctx.arc(0, 0, 3, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        });
+
+        state.obstacles.forEach((o) => {
+          ctx.save();
+          ctx.shadowColor = o.hue;
+          ctx.shadowBlur = 15;
+          ctx.fillStyle = o.hue;
+          roundRect(o.x - o.w / 2, o.y - o.h / 2, o.w, o.h, 7);
+          ctx.fill();
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
+          roundRect(o.x - o.w / 2 + 5, o.y - o.h / 2 + 5, o.w - 10, o.h - 10, 5);
+          ctx.fill();
+          ctx.restore();
+        });
+
+        state.sparks.forEach((s) => {
+          ctx.globalAlpha = Math.max(0, s.life / s.max);
+          ctx.fillStyle = s.color;
+          ctx.fillRect(s.x - 2, s.y - 2, 4, 4);
+          ctx.globalAlpha = 1;
+        });
+
+        drawPlayer();
+
+        if (state.combo > 1 && state.running) {
+          ctx.fillStyle = 'rgba(184, 255, 91, 0.88)';
+          ctx.font = '800 16px system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(`${state.combo}x`, state.player.x, state.player.y - state.player.r * 2.1);
+        }
+
+        if (state.paused) {
+          ctx.fillStyle = 'rgba(4, 7, 12, 0.58)';
+          ctx.fillRect(0, 0, state.w, state.h);
+          ctx.fillStyle = '#f4f7fb';
+          ctx.font = '800 34px system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('Paused', state.w / 2, state.h / 2);
+        }
+      }
+
+      function frame(now) {
+        const dt = Math.min(0.033, (now - state.last) / 1000 || 0);
+        state.last = now;
+        update(dt);
+        draw();
+        requestAnimationFrame(frame);
+      }
+
+      function setPointer(clientX) {
+        state.pointer = Math.max(state.road.left, Math.min(state.road.right, clientX));
+      }
+
+      window.addEventListener('resize', resize);
+      window.addEventListener('pointerdown', (e) => {
+        if (!state.running && !state.gameOver) return;
+        setPointer(e.clientX);
+      });
+      window.addEventListener('pointermove', (e) => {
+        if (state.pointer !== null) setPointer(e.clientX);
+      });
+      window.addEventListener('pointerup', () => { state.pointer = null; });
+      window.addEventListener('pointercancel', () => { state.pointer = null; });
+
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowLeft' || e.key.toLowerCase() === 'a') state.steer = -1;
+        if (e.key === 'ArrowRight' || e.key.toLowerCase() === 'd') state.steer = 1;
+        if (e.key === ' ' && state.running) {
+          state.paused = !state.paused;
+          pauseBtn.textContent = state.paused ? '▶' : 'Ⅱ';
+        }
+      });
+      window.addEventListener('keyup', (e) => {
+        if (['ArrowLeft', 'ArrowRight', 'a', 'd'].includes(e.key.toLowerCase())) state.steer = 0;
+      });
+
+      startBtn.addEventListener('click', reset);
+      pauseBtn.addEventListener('click', () => {
+        if (!state.running) return;
+        state.paused = !state.paused;
+        pauseBtn.textContent = state.paused ? '▶' : 'Ⅱ';
+      });
+
+      resize();
+      requestAnimationFrame((t) => {
+        state.last = t;
+        frame(t);
+      });
+    })();
+  </script>
+</body>
+</html>
