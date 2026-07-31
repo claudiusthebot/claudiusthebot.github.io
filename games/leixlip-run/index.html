@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>Leixlip Run — C3 Commute Simulator</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b0f14;color:#cfe3f5;
+    font:14px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;overflow:hidden;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px}
+  canvas{background:#0d1319;border:1px solid #1e2a36;border-radius:8px;
+    max-width:98vw;max-height:76vh;touch-action:none;image-rendering:pixelated}
+  #hud{display:flex;gap:18px;font-size:12px;letter-spacing:.06em;color:#7f9db8;flex-wrap:wrap;justify-content:center}
+  b{color:#ffd479;font-weight:600}
+  .tip{font-size:11px;color:#52697f}
+</style>
+</head>
+<body>
+<div id="hud">
+  <span>STOP 3963 · <b id="dep">--:--</b></span>
+  <span>TIME TO BUS <b id="clock">0:00</b></span>
+  <span>DIST <b id="dist">0</b> m</span>
+  <span>COFFEE <b id="cof">0</b></span>
+  <span>BEST <b id="best">–</b></span>
+</div>
+<canvas id="c" width="960" height="360"></canvas>
+<div class="tip">SPACE / TAP = jump (hold longer = higher) · DOWN = slide · R = restart</div>
+<script>
+const C = document.getElementById('c'), X = C.getContext('2d');
+const W = C.width, H = C.height, GROUND = H - 58;
+
+// ---- the commute -------------------------------------------------------
+// Glendale Meadows -> stop 3963 ("opposite Intel East"). 1400 m of Leixlip.
+const TARGET = 11000;          // world px
+const METRES = 1400 / 11000;   // displayed as the real 1.4 km walk
+const START_SECONDS = 48;          // the bus does not care about you
+const state = {};
+
+function reset(){
+  Object.assign(state, {
+    t: 0, dt: 0, over: false, won: false,
+    x: 0, vx: 240, y: GROUND, vy: 0, onGround: true, sliding: 0,
+    hold: 0, holding: false,
+    left: START_SECONDS, coffee: 0, shake: 0, msg: '',
+    obs: [], pick: [], bg: [], last: performance.now(), spawn: 260
+  });
+  for (let i = 0; i < 40; i++) state.bg.push({x: Math.random()*W*3, h: 20+Math.random()*90, w: 30+Math.random()*70, s: .2+Math.random()*.5});
+  document.getElementById('dep').textContent = depTime();
+  seed();
+}
+function depTime(){
+  const d = new Date(Date.now() + START_SECONDS*1000);
+  return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+}
+
+// obstacle vocabulary: things that actually stand between you and the C3
+const KINDS = [
+  {k:'bodie',  w:46, h:34, air:false, col:'#c89a5b', label:'Bodie'},
+  {k:'bin',    w:30, h:44, air:false, col:'#3f5b46', label:''},
+  {k:'puddle', w:54, h:10, air:false, col:'#2b4a63', label:''},
+  {k:'gate',   w:22, h:40, air:true,  col:'#6d5a7a', label:''},   // slide under
+  {k:'polo',   w:62, h:36, air:false, col:'#8fa8bd', label:'Polo'}
+];
+function seed(){ for (let i=0;i<3;i++) spawnObs(600 + i*300); }
+function spawnObs(atX){
+  const k = KINDS[(Math.random()*KINDS.length)|0];
+  state.obs.push({...k, ox: atX, hit:false});
+  if (Math.random() < .45) state.pick.push({ox: atX + 120 + Math.random()*120, oy: GROUND - 60 - Math.random()*70, got:false});
+}
+
+// ---- input -------------------------------------------------------------
+function jumpDown(){ if (state.over) return reset();
+  if (state.onGround){ state.holding = true; state.hold = 0; state.vy = -380; state.onGround = false; } }
+function jumpUp(){ state.holding = false; }
+addEventListener('keydown', e => {
+  if (e.code === 'Space' || e.code === 'ArrowUp'){ e.preventDefault(); jumpDown(); }
+  if (e.code === 'ArrowDown'){ state.sliding = .45; }
+  if (e.key === 'r' || e.key === 'R') reset();
+});
+addEventListener('keyup', e => { if (e.code === 'Space' || e.code === 'ArrowUp') jumpUp(); });
+C.addEventListener('pointerdown', e => { e.preventDefault(); jumpDown(); });
+addEventListener('pointerup', jumpUp);
+
+// ---- sim ---------------------------------------------------------------
+function step(dt){
+  if (state.over) return;
+  state.t += dt; state.left -= dt;
+  if (state.holding && state.vy < 0){ state.hold += dt; if (state.hold < .18) state.vy -= 620*dt; }
+  state.sliding = Math.max(0, state.sliding - dt);
+  state.vy += 1150*dt; state.y += state.vy*dt;
+  if (state.y >= GROUND){ state.y = GROUND; state.vy = 0; state.onGround = true; }
+
+  const speed = state.vx + state.coffee*22 + Math.min(90, state.t*4);
+  state.x += speed*dt;
+
+  // spawn ahead
+  const far = state.obs.length ? Math.max(...state.obs.map(o=>o.ox)) : state.x;
+  if (far < state.x + 1600 && far < TARGET - 300) spawnObs(far + 190 + Math.random()*220);
+
+  const px = 120, pw = 26, ph = state.sliding > 0 ? 20 : 42;
+  const pyTop = state.y - ph;
+  for (const o of state.obs){
+    if (o.hit) continue;
+    const sx = px + (o.ox - state.x);
+    if (sx > px + pw || sx + o.w < px) continue;
+    const top = o.air ? GROUND - 78 : GROUND - o.h, bot = o.air ? GROUND - 34 : GROUND;
+    if (pyTop < bot - 4 && state.y > top + 6){
+      o.hit = true; state.left -= 5; state.shake = .35; state.vx = Math.max(150, state.vx - 20);
+      state.msg = o.k === 'bodie' ? 'Bodie wanted a pet. -5s'
+        : o.k === 'polo' ? 'Someone double-parked. -5s'
+        : o.k === 'puddle' ? 'Wet sock. -5s'
+        : o.k === 'gate' ? 'Ate a gate. -5s' : 'Bin. -5s';
+    }
+  }
+  for (const p of state.pick){
+    if (p.got) continue;
+    const sx = px + (p.ox - state.x);
+    if (Math.abs(sx - px) < 26 && Math.abs(p.oy - (state.y - 20)) < 34){
+      p.got = true; state.coffee++; state.left += 3; state.msg = 'Coffee. +3s';
+    }
+  }
+  if (state.x >= TARGET){ state.over = true; state.won = state.left > 0; finish(); }
+  else if (state.left <= 0){ state.left = 0; state.over = true; state.won = false; finish(); }
+  state.shake = Math.max(0, state.shake - dt);
+}
+function finish(){
+  if (state.won){
+    const margin = state.left.toFixed(1);
+    const best = localStorage.getItem('leixlip_best');
+    if (!best || +margin > +best) localStorage.setItem('leixlip_best', margin);
+    document.getElementById('best').textContent = (localStorage.getItem('leixlip_best')||margin) + 's';
+  }
+}
+
+// ---- render ------------------------------------------------------------
+function draw(){
+  X.save();
+  if (state.shake > 0) X.translate((Math.random()-.5)*8*state.shake*3, (Math.random()-.5)*6*state.shake*3);
+  X.clearRect(-20,-20,W+40,H+40);
+  // sky wash
+  const g = X.createLinearGradient(0,0,0,H); g.addColorStop(0,'#0e1620'); g.addColorStop(1,'#0a0e13');
+  X.fillStyle = g; X.fillRect(0,0,W,H);
+  // parallax Leixlip
+  for (const b of state.bg){
+    const sx = ((b.x - state.x*b.s) % (W*1.5) + W*1.5) % (W*1.5);
+    X.fillStyle = `rgba(30,48,66,${.25 + b.s*.5})`;
+    X.fillRect(sx, GROUND - b.h, b.w, b.h);
+  }
+  // road
+  X.fillStyle = '#111a22'; X.fillRect(0, GROUND, W, H-GROUND);
+  X.strokeStyle = '#243444'; X.lineWidth = 2; X.beginPath(); X.moveTo(0,GROUND); X.lineTo(W,GROUND); X.stroke();
+  X.setLineDash([26,26]); X.strokeStyle = '#1c2b38';
+  X.beginPath(); const off = -(state.x*1.0)%52; X.moveTo(off, GROUND+26); X.lineTo(W, GROUND+26); X.stroke(); X.setLineDash([]);
+
+  const px = 120;
+  // obstacles
+  for (const o of state.obs){
+    const sx = px + (o.ox - state.x); if (sx < -140 || sx > W+40) continue;
+    X.fillStyle = o.hit ? '#3a2a2a' : o.col;
+    if (o.air) X.fillRect(sx, GROUND-78, o.w, 44);
+    else if (o.k==='puddle'){ X.fillStyle = o.hit?'#22323f':'#204863'; X.fillRect(sx, GROUND-6, o.w, 6); }
+    else X.fillRect(sx, GROUND-o.h, o.w, o.h);
+    if (o.k==='bodie' && !o.hit){ X.fillStyle='#e2c08a'; X.fillRect(sx+34, GROUND-40, 14, 12); X.fillRect(sx-8, GROUND-16, 10, 5); }
+    if (o.k==='polo' && !o.hit){ X.fillStyle='#1b2733'; X.fillRect(sx+8, GROUND-30, 26, 14); X.fillRect(sx+36, GROUND-30, 20, 14);
+      X.fillStyle='#0e151c'; X.beginPath(); X.arc(sx+18,GROUND,8,0,7); X.arc(sx+48,GROUND,8,0,7); X.fill(); }
+  }
+  // coffee
+  for (const p of state.pick){
+    if (p.got) continue; const sx = px + (p.ox - state.x); if (sx < -40 || sx > W+40) continue;
+    X.fillStyle = '#ffd479'; X.fillRect(sx-6, p.oy-8, 12, 14);
+    X.fillStyle = '#8a6a2a'; X.fillRect(sx-6, p.oy-11, 12, 3);
+  }
+  // the bus, waiting at TARGET, doors closing
+  const bx = px + (TARGET - state.x);
+  if (bx < W + 300){
+    X.fillStyle = '#f0c419'; X.fillRect(bx, GROUND-92, 210, 92);
+    X.fillStyle = '#0d1319'; X.fillRect(bx+12, GROUND-80, 60, 34); X.fillRect(bx+84, GROUND-80, 50, 34); X.fillRect(bx+146, GROUND-80, 50, 34);
+    X.fillStyle = '#101820'; X.fillRect(bx+150, GROUND-44, 44, 44);
+    X.fillStyle = '#1a1f26'; X.beginPath(); X.arc(bx+45,GROUND,13,0,7); X.arc(bx+165,GROUND,13,0,7); X.fill();
+    X.fillStyle = '#0d1319'; X.font = 'bold 20px ui-monospace,monospace'; X.fillText('C3', bx+22, GROUND-58);
+    X.fillStyle = '#e8571f'; X.fillRect(bx, GROUND-100, 210, 10);
+  }
+  // runner
+  const ph = state.sliding > 0 ? 20 : 42;
+  X.fillStyle = state.over && !state.won ? '#8b3b3b' : '#7fd4ff';
+  X.fillRect(px, state.y-ph, 26, ph);
+  X.fillStyle = '#cfe3f5'; X.fillRect(px+4, state.y-ph-10, 18, 12);
+  if (!state.onGround){ X.fillStyle='#3f7f9c'; X.fillRect(px-8, state.y-ph+8, 10, 6); }
+
+  // urgency vignette
+  if (state.left < 15 && !state.over){
+    X.fillStyle = `rgba(200,40,40,${0.06 + 0.10*Math.abs(Math.sin(state.t*6))})`; X.fillRect(0,0,W,H);
+  }
+  // message
+  if (state.msg){ X.fillStyle='#8fb4d0'; X.font='13px ui-monospace,monospace'; X.fillText(state.msg, W-260, 30); }
+
+  if (state.over){
+    X.fillStyle = 'rgba(6,10,14,.82)'; X.fillRect(0,0,W,H);
+    X.textAlign = 'center';
+    X.fillStyle = state.won ? '#8fe08f' : '#ff8f8f';
+    X.font = 'bold 30px ui-monospace,monospace';
+    X.fillText(state.won ? 'ON THE BUS' : 'MISSED IT', W/2, H/2 - 14);
+    X.fillStyle = '#9db8cd'; X.font = '14px ui-monospace,monospace';
+    X.fillText(state.won
+      ? `Boarded with ${state.left.toFixed(1)}s to spare · ${state.coffee} coffee`
+      : `${Math.round((TARGET - state.x)*METRES)} m short. Next C3 in 27 minutes.`, W/2, H/2 + 16);
+    X.fillText('press R / tap to run it again', W/2, H/2 + 44);
+    X.textAlign = 'left';
+  }
+  X.restore();
+
+  document.getElementById('clock').textContent =
+    Math.floor(state.left/60) + ':' + String(Math.floor(state.left%60)).padStart(2,'0');
+  document.getElementById('dist').textContent = Math.round(Math.min(TARGET, state.x)*METRES);
+  document.getElementById('cof').textContent = state.coffee;
+}
+
+function loop(now){
+  const dt = Math.min(.05, (now - state.last)/1000); state.last = now;
+  step(dt); draw(); requestAnimationFrame(loop);
+}
+reset();
+const b = localStorage.getItem('leixlip_best'); if (b) document.getElementById('best').textContent = b + 's';
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
